@@ -4,6 +4,7 @@ import cv2
 
 
 from matplotlib.pyplot import get_cmap
+import matplotlib.pyplot as plt
 
 
 # many colors from
@@ -107,6 +108,37 @@ class BaseViz:
 
         return result
 
+    def visualize_vel(self, vel, threshold=None):
+        """
+        vel: (2, h, w) numpy array representing the velocity field
+        """
+        if isinstance(vel, torch.Tensor):
+            vel = vel.cpu().numpy().transpose(1, 2, 0)
+
+        if threshold is not None:
+            vel = (vel > threshold).astype(np.float32)
+
+        X, Y = np.meshgrid(np.arange(0, vel.shape[0]), np.arange(0, vel.shape[1]))
+        U = vel[:,:,0]
+        V = vel[:,:,1]
+
+        
+        plt.figure(figsize=(10, 10))
+        plt.quiver(X, Y, U, V, angles='xy', scale_units='xy', scale=1)
+        plt.xlim(-10, vel.shape[0] + 10)
+        plt.ylim(-10, vel.shape[1] + 10)
+        plt.axis('off')
+        plt.title('2D Velocity Field')
+
+        # Save the plot as an image file
+        plt.savefig("velocity_field.png")
+        plt.close()
+        
+        # Load the image file as a numpy array
+        img = cv2.imread("velocity_field.png")
+
+        return img
+
     # def visualize_pred_unused(self, bev, pred, threshold=None):
     #     h, w, c = pred.shape
 
@@ -167,7 +199,16 @@ class BaseViz:
             else:
                 right = self.visualize_bev(bev[b])
 
+            # added velocity field visualization
+            vel = torch.cat((pred['velocity_x'], pred['velocity_y']), dim=1)[b]
+            vel_truth = batch['velocity_map'][b]
+            vel = self.visualize_vel(vel)
+            vel_truth = self.visualize_vel(vel_truth)
+            
+            right = cv2.resize(right, (400, 400))
             right = [right] + self.visualize_custom(batch, pred, b)
+            
+            right = right + []
             right = [x for x in right if x is not None]
             right = np.hstack(right)
 
@@ -183,7 +224,10 @@ class BaseViz:
                 else:
                     left = np.hstack([resize(x, right) for x in imgs])
 
-                yield np.hstack((left, right))
+                top = np.hstack((left, right))
+                bottom = np.hstack((vel, vel_truth))
+                bottom = cv2.resize(bottom, (top.shape[1], top.shape[1]//2))
+                yield np.vstack((top, bottom))
             else:
                 yield right
 

@@ -137,13 +137,17 @@ class NuScenesDataset(torch.utils.data.Dataset):
     def parse_scene(self, scene_record, camera_rigs):
         data = []
         sample_token = scene_record['first_sample_token']
+        prev_sample_token = sample_token
+        sample_token = self.nusc.get('sample', sample_token)['next'] # start with the second sample
 
         while sample_token:
+            prev_sample_record = self.nusc.get('sample', prev_sample_token)
             sample_record = self.nusc.get('sample', sample_token)
 
             for camera_rig in camera_rigs:
-                data.append(self.parse_sample_record(sample_record, camera_rig))
+                data.append(self.parse_sample_record(prev_sample_record, sample_record, camera_rig))
 
+            prev_sample_token = sample_token
             sample_token = sample_record['next']
 
         return data
@@ -151,7 +155,7 @@ class NuScenesDataset(torch.utils.data.Dataset):
     def parse_pose(self, record, *args, **kwargs):
         return get_pose(record['rotation'], record['translation'], *args, **kwargs)
 
-    def parse_sample_record(self, sample_record, camera_rig):
+    def parse_sample_record(self, prev_sample_record, sample_record, camera_rig):
         lidar_record = self.nusc.get('sample_data', sample_record['data']['LIDAR_TOP'])
         egolidar = self.nusc.get('ego_pose', lidar_record['ego_pose_token'])
 
@@ -159,7 +163,13 @@ class NuScenesDataset(torch.utils.data.Dataset):
         egolidarflat_from_world = self.parse_pose(egolidar, flat=True, inv=True)
 
         cam_channels = []
+        
+        prev_images = []
         images = []
+
+        prev_intrinsics = []
+        prev_extrinsics = []
+
         intrinsics = []
         extrinsics = []
 
@@ -180,10 +190,27 @@ class NuScenesDataset(torch.utils.data.Dataset):
             full_path = Path(self.nusc.get_sample_data_path(cam_token))
             image_path = str(full_path.relative_to(self.nusc.dataroot))
 
+            prev_cam_token = prev_sample_record['data'][cam_channel]
+            prev_cam_record = self.nusc.get('sample_data', prev_cam_token)
+            prev_egocam = self.nusc.get('ego_pose', prev_cam_record['ego_pose_token'])
+            prev_cam = self.nusc.get('calibrated_sensor', prev_cam_record['calibrated_sensor_token'])
+
+            prev_cam_from_egocam = self.parse_pose(prev_cam, inv=True)
+            prev_egocam_from_world = self.parse_pose(prev_egocam, inv=True)
+
+            prev_E = prev_cam_from_egocam @ prev_egocam_from_world @ world_from_egolidarflat
+            prev_I = prev_cam['camera_intrinsic']
+
+            prev_full_path = Path(self.nusc.get_sample_data_path(prev_cam_token))
+            prev_image_path = str(prev_full_path.relative_to(self.nusc.dataroot))
+
             cam_channels.append(cam_channel)
             intrinsics.append(I)
             extrinsics.append(E.tolist())
+            prev_intrinsics.append(prev_I)
+            prev_extrinsics.append(prev_E.tolist())
             images.append(image_path)
+            prev_images.append(prev_image_path)
 
         return {
             'scene': self.scene_name,
@@ -197,6 +224,10 @@ class NuScenesDataset(torch.utils.data.Dataset):
             'intrinsics': intrinsics,
             'extrinsics': extrinsics,
             'images': images,
+
+            'prev_intrinsics': prev_intrinsics,
+            'prev_extrinsics': prev_extrinsics,
+            'prev_images': prev_images,
         }
 
     def get_dynamic_objects(self, sample, annotations):

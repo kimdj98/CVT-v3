@@ -13,3 +13,9 @@ center:
 
   gamma: 2.0
   min_visibility: 2
+
+velocity_weight: 1.0
+velocity:
+  _target_: cross_view_transformer.losses.VelocityLoss
+
+  # gamma: 0.99

@@ -1,4 +1,5 @@
 import torch
+import re
 
 from hydra.utils import instantiate
 from omegaconf import OmegaConf, DictConfig
@@ -12,6 +13,7 @@ from .losses import MultipleLoss
 from collections.abc import Callable
 from typing import Tuple, Dict, Optional
 
+from omegaconf import open_dict
 
 def setup_config(cfg: DictConfig, override: Optional[Callable] = None):
     OmegaConf.set_struct(cfg, False)
@@ -62,7 +64,12 @@ def load_backbone(checkpoint_path: str, prefix: str = 'backbone'):
 
     cfg = DictConfig(checkpoint['hyper_parameters'])
 
-    cfg = OmegaConf.to_object(checkpoint['hyper_parameters'])
+    if 'cvt_nuscenes_vehicles_50k' in str(checkpoint_path): # if load pretrained model for the first-time
+        with open_dict(cfg.model.outputs):
+            cfg.model.outputs['velocity_x'] = [2, 3]
+            cfg.model.outputs['velocity_y'] = [3, 4]
+            
+    # cfg = OmegaConf.to_object(checkpoint['hyper_parameters'])
     # cfg['model']['encoder']['backbone']['image_height'] = cfg['model']['encoder']['backbone'].pop('input_height')
     # cfg['model']['encoder']['backbone']['image_width'] = cfg['model']['encoder']['backbone'].pop('input_width')
     # cfg['model']['encoder']['cross_view'].pop('spherical')
@@ -73,7 +80,20 @@ def load_backbone(checkpoint_path: str, prefix: str = 'backbone'):
     state_dict = remove_prefix(checkpoint['state_dict'], prefix)
 
     backbone = setup_network(cfg)
-    backbone.load_state_dict(state_dict)
+
+    # remove parts where different architecture is used
+    if 'cvt_nuscenes_vehicles_50k' in str(checkpoint_path):
+        keys_to_remove = [key for key in state_dict.keys() if ('to_logits' in key \
+                                                            or re.match(r'decoder\.layers\.\d+\.conv\.1\.weight', key)\
+                                                            or re.match(r'decoder\.layers\.\d+\.up\.weight', key)\
+                                                            or re.match(r'backbone\.decoder\.layers\.conv\.1\.weight', key)\
+                                                            or re.match(r'backbone\.decoder\.layers\.\d+\.up\.weight', key)\
+                                                            or re.match(r'backbone\.to_logits\.3\.(weight|bias)', key))]
+                                                                        
+        for key in keys_to_remove:
+            del state_dict[key]
+    
+    backbone.load_state_dict(state_dict, strict=False)
 
     return backbone
 

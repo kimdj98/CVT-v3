@@ -111,6 +111,53 @@ class BEVEmbedding(nn.Module):
         return self.learned_features
 
 
+class VelEmbedding(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        sigma: int,
+        bev_height: int,
+        bev_width: int,
+        h_meters: int,
+        w_meters: int,
+        offset: int,
+        decoder_blocks: list,
+    ):
+        """
+        Only real arguments are:
+
+        dim: embedding size
+        sigma: scale for initializing embedding
+
+        The rest of the arguments are used for constructing the view matrix.
+
+        In hindsight we should have just specified the view matrix in config
+        and passed in the view matrix...
+        """
+        super().__init__()
+
+        # each decoder block upsamples the bev embedding by a factor of 2
+        h = bev_height // (2 ** len(decoder_blocks))
+        w = bev_width // (2 ** len(decoder_blocks))
+
+        # bev coordinates
+        grid = generate_grid(h, w).squeeze(0)
+        grid[0] = bev_width * grid[0]
+        grid[1] = bev_height * grid[1]
+
+        # map from bev coordinates to ego frame
+        V = get_view_matrix(bev_height, bev_width, h_meters, w_meters, offset)  # 3 3
+        V_inv = torch.FloatTensor(V).inverse()                                  # 3 3
+        grid = V_inv @ rearrange(grid, 'd h w -> d (h w)')                      # 3 (h w)
+        grid = rearrange(grid, 'd (h w) -> d h w', h=h, w=w)                    # 3 h w
+
+        # egocentric frame
+        self.register_buffer('grid', grid, persistent=False)                    # 3 h w
+        self.learned_features = nn.Parameter(sigma * torch.randn(dim, h, w))    # d h w
+
+    def get_prior(self):
+        return self.learned_features
+
 class CrossAttention(nn.Module):
     def __init__(self, dim, heads, dim_head, qkv_bias, norm=nn.LayerNorm):
         super().__init__()
@@ -214,6 +261,7 @@ class CrossViewAttention(nn.Module):
                 nn.Conv2d(feat_dim, dim, 1, bias=False))
 
         self.bev_embed = nn.Conv2d(2, dim, 1)
+        self.vel_embed = nn.Conv2d(2, dim, 1)
         self.img_embed = nn.Conv2d(4, dim, 1, bias=False)
         self.cam_embed = nn.Conv2d(4, dim, 1, bias=False)
 
@@ -223,10 +271,15 @@ class CrossViewAttention(nn.Module):
     def forward(
         self,
         x: torch.FloatTensor,
+        y: torch.FloatTensor,
         bev: BEVEmbedding,
+        vel: VelEmbedding,
         feature: torch.FloatTensor,
+        prev_feature: torch.FloatTensor,
         I_inv: torch.FloatTensor,
         E_inv: torch.FloatTensor,
+        prev_I_inv: torch.FloatTensor,
+        prev_E_inv: torch.FloatTensor,
     ):
         """
         x: (b, c, H, W)
@@ -241,10 +294,12 @@ class CrossViewAttention(nn.Module):
         pixel = self.image_plane                                                # b n 3 h w
         _, _, _, h, w = pixel.shape
 
+        # camera embedding
         c = E_inv[..., -1:]                                                     # b n 4 1
         c_flat = rearrange(c, 'b n ... -> (b n) ...')[..., None]                # (b n) 4 1 1
         c_embed = self.cam_embed(c_flat)                                        # (b n) d 1 1
 
+        # camera embedding with intrinsics, extrinsics information
         pixel_flat = rearrange(pixel, '... h w -> ... (h w)')                   # 1 1 3 (h w)
         cam = I_inv @ pixel_flat                                                # b n 3 (h w)
         cam = F.pad(cam, (0, 0, 0, 1, 0, 0, 0, 0), value=1)                     # b n 4 (h w)
@@ -252,17 +307,29 @@ class CrossViewAttention(nn.Module):
         d_flat = rearrange(d, 'b n d (h w) -> (b n) d h w', h=h, w=w)           # (b n) 4 h w
         d_embed = self.img_embed(d_flat)                                        # (b n) d h w
 
+        # image embedding
         img_embed = d_embed - c_embed                                           # (b n) d h w
         img_embed = img_embed / (img_embed.norm(dim=1, keepdim=True) + 1e-7)    # (b n) d h w
 
+        # occupancy embedding
         world = bev.grid[:2]                                                    # 2 H W
         w_embed = self.bev_embed(world[None])                                   # 1 d H W
         bev_embed = w_embed - c_embed                                           # (b n) d H W
         bev_embed = bev_embed / (bev_embed.norm(dim=1, keepdim=True) + 1e-7)    # (b n) d H W
         query_pos = rearrange(bev_embed, '(b n) ... -> b n ...', b=b, n=n)      # b n d H W
 
+        # velocity embedding
+        vel_world = vel.grid[:2]                                                # 2 h w
+        v_embed = self.vel_embed(vel_world[None])                               # 1 d h w
+        vel_embed = v_embed - c_embed                                           # (b n) d h w
+        vel_embed = vel_embed / (vel_embed.norm(dim=1, keepdim=True) + 1e-7)    # (b n) d h w
+        query_pos_vel = rearrange(vel_embed, '(b n) ... -> b n ...', b=b, n=n)  # b n d h w
+
+        # flatten feature
+        prev_feature_flat = rearrange(prev_feature, 'b n ... -> (b n) ...')     # (b n) d h w
         feature_flat = rearrange(feature, 'b n ... -> (b n) ...')               # (b n) d h w
 
+        # cross-attention with BEV embedding and image embedding
         if self.feature_proj is not None:
             key_flat = img_embed + self.feature_proj(feature_flat)              # (b n) d h w
         else:
@@ -274,8 +341,27 @@ class CrossViewAttention(nn.Module):
         query = query_pos + x[:, None]                                          # b n d H W
         key = rearrange(key_flat, '(b n) ... -> b n ...', b=b, n=n)             # b n d h w
         val = rearrange(val_flat, '(b n) ... -> b n ...', b=b, n=n)             # b n d h w
+        occupancy = self.cross_attend(query, key, val, skip=x if self.skip else None)
 
-        return self.cross_attend(query, key, val, skip=x if self.skip else None)
+        # cross-attention with velocity embedding and image embedding
+        feature_flat_vel = torch.concat((prev_feature_flat, feature_flat), dim=0)  # (2 b n) d h w
+        img_embed_vel = repeat(img_embed, 'b ... -> (2 b) ...')                    # (2 b n) d h w
+
+        if self.feature_proj is not None:
+            key_flat_vel = img_embed_vel + self.feature_proj(feature_flat_vel)             # (2 b n) d h w
+        else:
+            key_flat_vel = img_embed_vel                                               # (2 b n) d h w
+        
+        val_flat_vel = self.feature_linear(feature_flat_vel)                           # (2 b n) d h w
+        
+        # Expand + refine the velocity embedding
+        query_vel = query_pos_vel + y[:, None]                                              # b n d h w
+        query_vel = repeat(query_vel, 'b n ... -> b (2 n) ...')                             # b (2 n) d h w
+        key_vel = rearrange(key_flat_vel, '(a b n) ... -> b (a n) ...', b=b, n=n, a=2)      # b (2 n) d h w
+        val_vel = rearrange(val_flat_vel, '(a b n) ... -> b (a n) ...', b=b, n=n, a=2)      # b (2 n) d h w
+        velocity = self.cross_attend(query_vel, key_vel, val_vel, skip=y if self.skip else None)
+        
+        return torch.concat((occupancy, velocity), dim=1)                      # b (2 d) h w
 
 
 class Encoder(nn.Module):
@@ -313,26 +399,40 @@ class Encoder(nn.Module):
             layers.append(layer)
 
         self.bev_embedding = BEVEmbedding(dim, **bev_embedding)
+        self.vel_embedding = VelEmbedding(dim, **bev_embedding)
         self.cross_views = nn.ModuleList(cross_views)
         self.layers = nn.ModuleList(layers)
 
     def forward(self, batch):
         b, n, _, _, _ = batch['image'].shape            # b n c h w
 
+        prev_image = batch['prev_image'].flatten(0,1)   # (bn) c h w
+        prev_I_inv = batch['prev_intrinsics'].inverse() # b n 3 3
+        prev_E_inv = batch['prev_extrinsics'].inverse() # b n 4 4
+
         image = batch['image'].flatten(0, 1)            # (bn) c h w
         I_inv = batch['intrinsics'].inverse()           # b n 3 3
         E_inv = batch['extrinsics'].inverse()           # b n 4 4
 
+        prev_features = [self.down(y) for y in self.backbone(self.norm(prev_image))] # multi-resolution patch embedding
         features = [self.down(y) for y in self.backbone(self.norm(image))] # multi-resolution patch embedding
         # features[0].shape: torch.Size([24, 32, 56, 120])
         # features[1].shape: torch.Size([24, 112, 14, 30])
+
+        # get BEV embedding and Velocity embedding
         x = self.bev_embedding.get_prior()              # d H W
         x = repeat(x, '... -> b ...', b=b)              # b d H W
 
-        for cross_view, feature, layer in zip(self.cross_views, features, self.layers):
+        y = self.vel_embedding.get_prior()              # d H W
+        y = repeat(y, '... -> b ...', b=b)              # b d H W
+
+        for cross_view, prev_feature, feature, layer in zip(self.cross_views, prev_features, features, self.layers):
             feature = rearrange(feature, '(b n) ... -> b n ...', b=b, n=n)
+            prev_feature = rearrange(prev_feature, '(b n) ... -> b n ...', b=b, n=n)
 
-            x = cross_view(x, self.bev_embedding, feature, I_inv, E_inv)
-            x = layer(x)
+            result = cross_view(x, y, self.bev_embedding, self.vel_embedding,\
+                           feature, prev_feature, I_inv, E_inv, prev_I_inv, prev_E_inv)
+            
+            # b (2d) H W -> (b d H W) occupancy + (b d H W) velocity
 
-        return x
+        return result

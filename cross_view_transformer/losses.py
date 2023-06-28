@@ -6,6 +6,43 @@ from fvcore.nn import sigmoid_focal_loss
 
 logger = logging.getLogger(__name__)
 
+def velocityLoss(pred, label, gamma=None, reduction='mean'):
+    """
+    End_point error loss
+    """
+    assert pred.shape == label.shape
+
+    error = torch.abs(pred - label)
+
+    if gamma != None:
+        mask = (label != 0)
+        loss = (error**2)*mask*gamma + (error**2)*(~mask)*(1-gamma)
+        
+    else:
+        loss = error**2
+
+    return loss.mean() if reduction == 'mean' else loss.sum()
+
+class VelocityLoss(torch.nn.Module):
+    def __init__(
+        self,
+        gamma=0.95,
+        reduction='mean' # 'mean' or 'sum'
+    ):
+        super().__init__()
+
+        self.gamma = gamma
+        self.reduction = reduction
+    
+    def forward(self, pred, batch):
+        if isinstance(pred, dict):
+            pred_x = pred['velocity_x']
+            pred_y = pred['velocity_y']
+            pred = torch.cat([pred_x, pred_y], dim=1)
+
+        batch = batch["velocity_map"]
+
+        return velocityLoss(pred, batch, self.gamma, self.reduction)
 
 class SigmoidFocalLoss(torch.nn.Module):
     def __init__(

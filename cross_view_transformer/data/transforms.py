@@ -54,7 +54,10 @@ class SaveDataTransform:
         return {
             'images': batch.images,
             'intrinsics': batch.intrinsics,
-            'extrinsics': batch.extrinsics
+            'extrinsics': batch.extrinsics,
+            'prev_images': batch.prev_images,
+            'prev_intrinsics': batch.prev_intrinsics,
+            'prev_extrinsics': batch.prev_extrinsics
         }
 
     def get_bev(self, batch: Sample):
@@ -126,10 +129,12 @@ class LoadDataTransform(torchvision.transforms.ToTensor):
         """
         Note: we invert I and E here for convenience.
         """
+        prev_images = list()
         images = list()
+        prev_intrinsics = list()
         intrinsics = list()
 
-        for image_path, I_original in zip(sample.images, sample.intrinsics):
+        for prev_image_path, image_path, prev_I_original, I_original in zip(sample.prev_images, sample.images, sample.prev_intrinsics, sample.intrinsics):
             h_resize = h + top_crop
             w_resize = w
 
@@ -148,11 +153,29 @@ class LoadDataTransform(torchvision.transforms.ToTensor):
             images.append(self.img_transform(image_new))
             intrinsics.append(torch.tensor(I))
 
+            prev_image = Image.open(self.dataset_dir / prev_image_path)
+
+            prev_image_new = prev_image.resize((w_resize, h_resize), resample=Image.BILINEAR)
+            prev_image_new = prev_image_new.crop((0, top_crop, prev_image_new.width, prev_image_new.height))
+
+            prev_I = np.float32(prev_I_original)
+            prev_I[0, 0] *= w_resize / image.width
+            prev_I[0, 2] *= w_resize / image.width
+            prev_I[1, 1] *= h_resize / image.height
+            prev_I[1, 2] *= h_resize / image.height
+            prev_I[1, 2] -= top_crop
+
+            prev_images.append(self.img_transform(prev_image_new))
+            prev_intrinsics.append(torch.tensor(prev_I))
+
         return {
             'cam_idx': torch.LongTensor(sample.cam_ids),
             'image': torch.stack(images, 0),
             'intrinsics': torch.stack(intrinsics, 0),
             'extrinsics': torch.tensor(np.float32(sample.extrinsics)),
+            'prev_image': torch.stack(prev_images, 0),
+            'prev_intrinsics': torch.stack(prev_intrinsics, 0),
+            'prev_extrinsics': torch.tensor(np.float32(sample.prev_extrinsics)),
         }
 
     def get_bev(self, sample: Sample):

@@ -10,3 +10,5 @@ model:
   outputs:
     bev: [0, 1]
     center: [1, 2]
+    velocity_x: [2, 3]
+    velocity_y: [3, 4]

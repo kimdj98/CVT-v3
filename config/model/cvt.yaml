@@ -22,7 +22,7 @@ encoder:
 
   cross_view:
     heads: 4
-    dim_head: 32
+    dim_head: 64
     qkv_bias: True
     skip: True
     no_image_features: False

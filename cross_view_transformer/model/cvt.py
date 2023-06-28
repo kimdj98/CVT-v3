@@ -1,5 +1,6 @@
+import torch
 import torch.nn as nn
-
+from einops import rearrange
 
 class CrossViewTransformer(nn.Module):
     def __init__(
@@ -34,7 +35,9 @@ class CrossViewTransformer(nn.Module):
 
     def forward(self, batch):
         x = self.encoder(batch)
+
         y = self.decoder(x)
+
         z = self.to_logits(y)
 
         return {k: z[:, start:stop] for k, (start, stop) in self.outputs.items()}
