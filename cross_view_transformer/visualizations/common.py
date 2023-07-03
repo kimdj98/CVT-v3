@@ -191,26 +191,30 @@ class BaseViz:
     @torch.no_grad()
     def visualize(self, batch, pred=None, b_max=8, **kwargs):
         bev = batch['bev']
+        prev_bev = batch['prev_bev']
         batch_size = bev.shape[0]
 
         for b in range(min(batch_size, b_max)):
             if pred is not None:
-                right = self.visualize_pred(bev[b], pred['bev'][b].sigmoid())
+                prev_right = self.visualize_pred(prev_bev[b], pred['occ_prev']['bev'][b].sigmoid())
+                curr_right = self.visualize_pred(bev[b], pred['occ_curr']['bev'][b].sigmoid())
             else:
-                right = self.visualize_bev(bev[b])
+                prev_right = self.visualize_bev(prev_bev[b])
+                curr_right = self.visualize_bev(bev[b])
 
             # added velocity field visualization
-            vel = torch.cat((pred['velocity_x'], pred['velocity_y']), dim=1)[b]
+            vel = torch.cat((pred['vel']['x'], pred['vel']['y']), dim=1)[b]
             vel_truth = batch['velocity_map'][b]
             vel = self.visualize_vel(vel)
             vel_truth = self.visualize_vel(vel_truth)
             
-            right = cv2.resize(right, (400, 400))
-            right = [right] + self.visualize_custom(batch, pred, b)
-            
-            right = right + []
-            right = [x for x in right if x is not None]
-            right = np.hstack(right)
+            prev_right = cv2.resize(prev_right, (400, 400))
+            curr_right = cv2.resize(curr_right, (400, 400))
+
+            rights = [prev_right, curr_right]
+
+            # right = [x for x in rights if x is not None]
+            right = np.hstack(rights)
 
             image = None if not hasattr(batch.get('image'), 'shape') else batch['image']
 
@@ -227,6 +231,7 @@ class BaseViz:
                 top = np.hstack((left, right))
                 bottom = np.hstack((vel, vel_truth))
                 bottom = cv2.resize(bottom, (top.shape[1], top.shape[1]//2))
+
                 yield np.vstack((top, bottom))
             else:
                 yield right

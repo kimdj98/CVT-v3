@@ -9,12 +9,13 @@ defaults:
   - metrics: default_metrics
 
 wandb:
+  # ======================== wandb ========================
   active: True
 
 model_name: model_base
 
 experiment:
-  project: cross_view_transformers_test               # wandb project
+  project: CVT_v2                                     # wandb project
   uuid: ${now:%m%d_%H%M%S}                            # model name
   save_dir: ${hydra:runtime.cwd}/logs/                # log directory, will be created
 
@@ -23,9 +24,9 @@ experiment:
   log_image_interval: 500
 
 loader:
-  batch_size: 2
+  batch_size: 2                                       # for GPU training, set to 2
   num_workers: 4
-  pin_memory: True
+  pin_memory: True                                   # for GPU training, set to True
   prefetch_factor: 4
 
 # AdamW
@@ -44,10 +45,16 @@ scheduler:
 
 # lightning trainer
 trainer:
-  max_steps: 300000                                       # 30001
+  max_steps: 30001                                       # 30001
   log_every_n_steps: 50
 
-  gpus: [3]
+  # ======================== switch training method ========================
+  accelerator: gpu                                      # for GPU training
+  gpus: [3]                                             # for GPU training
+
+  # gpus: 0
+
+
   precision: 32
 
   limit_train_batches: 1.0

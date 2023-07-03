@@ -59,7 +59,7 @@ def setup_experiment(cfg: DictConfig) -> Tuple[ModelModule, DataModule, Callable
     return model_module, data_module, viz_fn
 
 
-def load_backbone(checkpoint_path: str, prefix: str = 'backbone'):
+def load_backbone(checkpoint_path: str, backbone, prefix: str = 'backbone'):
     checkpoint = torch.load(checkpoint_path)
 
     cfg = DictConfig(checkpoint['hyper_parameters'])
@@ -79,17 +79,17 @@ def load_backbone(checkpoint_path: str, prefix: str = 'backbone'):
 
     state_dict = remove_prefix(checkpoint['state_dict'], prefix)
 
-    backbone = setup_network(cfg)
-
     # remove parts where different architecture is used
     if 'cvt_nuscenes_vehicles_50k' in str(checkpoint_path):
-        keys_to_remove = [key for key in state_dict.keys() if ('to_logits' in key \
-                                                            or re.match(r'decoder\.layers\.\d+\.conv\.1\.weight', key)\
-                                                            or re.match(r'decoder\.layers\.\d+\.up\.weight', key)\
-                                                            or re.match(r'backbone\.decoder\.layers\.conv\.1\.weight', key)\
-                                                            or re.match(r'backbone\.decoder\.layers\.\d+\.up\.weight', key)\
-                                                            or re.match(r'backbone\.to_logits\.3\.(weight|bias)', key))]
-                                                                        
+        keys_to_remove = [key for key in state_dict.keys() if (
+                                                            # 'to_logits' in key \
+                                                            # or re.match(r'decoder\.layers\.\d+\.conv\.1\.weight', key)\
+                                                            # or re.match(r'decoder\.layers\.\d+\.up\.weight', key)\
+                                                            # or re.match(r'backbone\.decoder\.layers\.conv\.1\.weight', key)\
+                                                            # or re.match(r'backbone\.decoder\.layers\.\d+\.up\.weight', key)\
+                                                            # or re.match(r'backbone\.to_logits\.3\.(weight|bias)', key)
+                                                            )]
+
         for key in keys_to_remove:
             del state_dict[key]
     

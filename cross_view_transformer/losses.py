@@ -36,8 +36,8 @@ class VelocityLoss(torch.nn.Module):
     
     def forward(self, pred, batch):
         if isinstance(pred, dict):
-            pred_x = pred['velocity_x']
-            pred_y = pred['velocity_y']
+            pred_x = pred['x']
+            pred_y = pred['y']
             pred = torch.cat([pred_x, pred_y], dim=1)
 
         batch = batch["velocity_map"]
@@ -105,7 +105,6 @@ class CenterLoss(SigmoidFocalLoss):
         self.min_visibility = min_visibility
 
     def forward(self, pred, batch):
-        pred = pred['center']
         label = batch['center']
         loss = super().forward(pred, label)
 
@@ -147,7 +146,19 @@ class MultipleLoss(torch.nn.ModuleDict):
         self._weights = weights
 
     def forward(self, pred, batch):
-        outputs = {k: v(pred, batch) for k, v in self.items()}
+        cur_visibility_loss = self['cur_visible'](pred["occ_curr"]["bev"], batch)         # BinarySegmentationLoss
+        prev_visibility_loss = self['prev_visible'](pred["occ_prev"]["bev"], batch)       # BinarySegmentationLoss
+        cur_center_loss = self['cur_center'](pred["occ_curr"]["center"], batch)              # CenterLoss
+        prev_center_loss = self['prev_center'](pred["occ_prev"]["center"], batch)            # CenterLoss
+        vel_loss = self['velocity'](pred["vel"], batch)                                                  # VelocityLoss
+
+        outputs = dict()
+        outputs.update(cur_visible=cur_visibility_loss)
+        outputs.update(prev_visible=prev_visibility_loss)
+        outputs.update(cur_center=cur_center_loss)
+        outputs.update(prev_center=prev_center_loss)
+        outputs.update(velocity=vel_loss)
+
         total = sum(self._weights[k] * o for k, o in outputs.items())
 
         return total, outputs

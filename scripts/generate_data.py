@@ -1,3 +1,6 @@
+import sys
+sys.path.insert(0, '.')
+
 import torch
 import json
 import hydra
@@ -57,6 +60,7 @@ def main(cfg):    # main function
         print(f'Generating split: {split}')
 
         for episode in tqdm(data.get_split(split, loader=False), position=0, leave=False):    # Iterating through each episode
+            episode.__getitem__(0)
             scene_dir = labels_dir / episode.scene_name     # Path of scene directory
             scene_dir.mkdir(exist_ok=True, parents=False)   # Make the directory if not exist
 
@@ -69,7 +73,7 @@ def main(cfg):    # main function
                 # Load data from disk to test if it was saved correctly
                 if i == 0 and viz_fn is not None:    # if visualization flag is passed then
                     unbatched = [load_xform(s) for s in batch]    # Load data in memory
-                    rebatched = torch.utils.data.dataloader.default_collate(unbatched)
+                    rebatched = torch.utils.data.dataloader.default_collate(unbatched)  
 
                     viz = np.vstack(viz_fn(rebatched))    # Show the data on screen
 

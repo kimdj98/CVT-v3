@@ -4,7 +4,7 @@ num_classes: 12                         # do not modify :)
 # used to get_split
 version: 'v1.0-trainval'                # 'v1.0-mini' for debugging
 dataset_dir: /home/kimdj98/my_folder/datasets/nuscenes
-labels_dir: /home/kimdj98/my_folder/datasets/cvt_labels_nuscenes_v3
+labels_dir: /home/kimdj98/my_folder/datasets/cvt_labels_nuscenes_v4
 
 # used to generate dataset
 cameras: [[0, 1, 2, 3, 4, 5]]
@@ -13,7 +13,7 @@ cameras: [[0, 1, 2, 3, 4, 5]]
 # Takes the form [[i, j, ...], [p, q, ...]]
 # where [i, j, ...] are indices of individual classes (car, truck, ...),
 # and will be grouped into one semantic class (vehicle).
-label_indices: null                                   
+label_indices: null
 
 # label parameters
 bev:

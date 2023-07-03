@@ -68,23 +68,32 @@ class SaveDataTransform:
         scene_dir = self.labels_dir / batch.scene
 
         bev_path = f'bev_{batch.token}.png'
+        prev_bev_path = f'prev_bev_{batch.token}.png'
         Image.fromarray(encode(batch.bev)).save(scene_dir / bev_path)
+        Image.fromarray(encode(batch.prev_bev)).save(scene_dir / prev_bev_path)
 
         result['bev'] = bev_path
+        result['prev_bev'] = prev_bev_path
 
         # Auxilliary labels
         if batch.get('aux') is not None:
             aux_path = f'aux_{batch.token}.npz'
+            prev_aux_path = f'prev_aux_{batch.token}.npz'
             np.savez_compressed(scene_dir / aux_path, aux=batch.aux)
+            np.savez_compressed(scene_dir / prev_aux_path, aux=batch.prev_aux)
 
             result['aux'] = aux_path
+            result['prev_aux'] = prev_aux_path
 
         # Visibility mask
         if batch.get('visibility') is not None:
             visibility_path = f'visibility_{batch.token}.png'
+            prev_visibility_path = f'prev_visibility_{batch.token}.png'
             Image.fromarray(batch.visibility).save(scene_dir / visibility_path)
+            Image.fromarray(batch.prev_visibility).save(scene_dir / prev_visibility_path)
 
             result['visibility'] = visibility_path
+            result['prev_visibility'] = prev_visibility_path
 
         # velocity_map
         if batch.get('velocity_map') is not None:
@@ -183,6 +192,11 @@ class LoadDataTransform(torchvision.transforms.ToTensor):
         bev = None
 
         if sample.bev is not None:
+            prev_bev = Image.open(scene_dir / sample.prev_bev)
+            prev_bev = decode(prev_bev, self.num_classes)
+            prev_bev = (255 * prev_bev).astype(np.uint8)
+            prev_bev = self.to_tensor(prev_bev)
+
             bev = Image.open(scene_dir / sample.bev)
             bev = decode(bev, self.num_classes)
             bev = (255 * bev).astype(np.uint8)
@@ -190,15 +204,20 @@ class LoadDataTransform(torchvision.transforms.ToTensor):
 
         result = {
             'bev': bev,
+            'prev_bev': prev_bev,
             'view': torch.tensor(sample.view),
         }
 
         if 'visibility' in sample:
+            prev_visibility = Image.open(scene_dir / sample.prev_visibility)
             visibility = Image.open(scene_dir / sample.visibility)
+            result['prev_visibility'] = np.array(prev_visibility, dtype=np.uint8)
             result['visibility'] = np.array(visibility, dtype=np.uint8)
 
         if 'aux' in sample:
+            prev_aux = np.load(scene_dir / sample.prev_aux)['aux']
             aux = np.load(scene_dir / sample.aux)['aux']
+            result['prev_center'] = self.to_tensor(prev_aux[..., 1])
             result['center'] = self.to_tensor(aux[..., 1])
 
         if 'pose' in sample:

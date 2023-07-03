@@ -41,7 +41,6 @@ class Decoder(nn.Module):
         super().__init__()
 
         layers = list()
-        dim = dim * 2
         channels = dim
 
         for out_channels in blocks:

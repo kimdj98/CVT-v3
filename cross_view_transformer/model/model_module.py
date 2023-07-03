@@ -1,7 +1,6 @@
 import torch
 import pytorch_lightning as pl
 
-
 class ModelModule(pl.LightningModule):
     def __init__(self, backbone, loss_func, metrics, optimizer_args, scheduler_args=None, cfg=None):
         super().__init__()
@@ -24,7 +23,7 @@ class ModelModule(pl.LightningModule):
         pred = self(batch)
         loss, loss_details = self.loss_func(pred, batch)
 
-        self.metrics.update(pred, batch)
+        # self.metrics.update(pred, batch)
 
         if self.trainer is not None:
             self.log(f'{prefix}/loss', loss.detach(), on_step=on_step, on_epoch=True)
@@ -46,33 +45,34 @@ class ModelModule(pl.LightningModule):
                                 batch_idx % self.hparams.experiment.log_image_interval == 0)
 
     def on_validation_start(self) -> None:
-        self._log_epoch_metrics('train')
+        # self._log_epoch_metrics('train')
         self._enable_dataloader_shuffle(self.trainer.val_dataloaders)
 
-    def validation_epoch_end(self, outputs):
-        self._log_epoch_metrics('val')
+    # def validation_epoch_end(self, outputs):
+    #     # pass
+    #     # self._log_epoch_metrics('val')
 
-    def _log_epoch_metrics(self, prefix: str):
-        """
-        lightning is a little odd - it goes
+    # def _log_epoch_metrics(self, prefix: str):
+    #     """
+    #     lightning is a little odd - it goes
 
-        on_train_start
-        ... does all the training steps ...
-        on_validation_start
-        ... does all the validation steps ...
-        on_validation_epoch_end
-        on_train_epoch_end
-        """
-        metrics = self.metrics.compute()
+    #     on_train_start
+    #     ... does all the training steps ...
+    #     on_validation_start
+    #     ... does all the validation steps ...
+    #     on_validation_epoch_end
+    #     on_train_epoch_end
+    #     """
+    #     metrics = self.metrics.compute()
 
-        for key, value in metrics.items():
-            if isinstance(value, dict):
-                for subkey, val in value.items():
-                    self.log(f'{prefix}/metrics/{key}{subkey}', val)
-            else:
-                self.log(f'{prefix}/metrics/{key}', value)
+    #     for key, value in metrics.items():
+    #         if isinstance(value, dict):
+    #             for subkey, val in value.items():
+    #                 self.log(f'{prefix}/metrics/{key}{subkey}', val)
+    #         else:
+    #             self.log(f'{prefix}/metrics/{key}', value)
 
-        self.metrics.reset()
+    #     self.metrics.reset()
 
     def _enable_dataloader_shuffle(self, dataloaders):
         """

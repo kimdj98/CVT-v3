@@ -43,10 +43,12 @@ class NuScenesGeneratedDataset(torch.utils.data.Dataset):
         self.transform = transform
 
     def __len__(self):
-        return len(self.samples)
+        # HACK: simple trick to avoid the 0th index
+        return len(self.samples)-1 
 
     def __getitem__(self, idx):
-        data = Sample(**self.samples[idx])
+        assert self.samples[idx+1] is not None, f'No sample at idx {idx+1}'
+        data = Sample(**self.samples[idx+1])
 
         if self.transform is not None:
             data = self.transform(data)

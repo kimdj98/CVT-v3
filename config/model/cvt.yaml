@@ -22,7 +22,7 @@ encoder:
 
   cross_view:
     heads: 4
-    dim_head: 64
+    dim_head: 32
     qkv_bias: True
     skip: True
     no_image_features: False
@@ -39,15 +39,24 @@ encoder:
     w_meters: ${data.bev.w_meters}
     offset: ${data.bev.offset}
 
-    decoder_blocks: ${model.decoder.blocks}
+    decoder_blocks: ${model.occ_decoder.blocks}
 
-decoder:
+occ_decoder:
   _target_: cross_view_transformer.model.decoder.Decoder
 
   dim: ${model.encoder.dim}
   blocks: [128, 128, 64]
   residual: True
   factor: 2
+
+vel_decoder:
+  _target_: cross_view_transformer.model.decoder.Decoder
+
+  dim: ${model.encoder.dim}
+  blocks: [128, 128, 64]
+  residual: True
+  factor: 2
+
 
 # decoder-velocity:
 #   _target_: cross_view_transformer.model.decoder_velocity.Decoder_Velocity

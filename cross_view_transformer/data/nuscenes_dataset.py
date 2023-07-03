@@ -532,34 +532,52 @@ class NuScenesDataset(torch.utils.data.Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        sample = self.samples[idx]
+        if (idx == 0): # case when there are no previous sample
+            pass
+        else:        
+            prev_sample = self.samples[idx-1]
+            sample = self.samples[idx]
 
-        # Raw annotations
-        anns_dynamic = self.get_annotations_by_category(sample, DYNAMIC) 
-        anns_vehicle = self.get_annotations_by_category(sample, ['vehicle'])[0]
+            # Raw annotations
+            anns_dynamic = self.get_annotations_by_category(sample, DYNAMIC) 
+            anns_vehicle = self.get_annotations_by_category(sample, ['vehicle'])[0]
 
-        static = self.get_static_layers(sample, STATIC)                             # 200 200 2 lane, road_segment
-        dividers = self.get_line_layers(sample, DIVIDER)                            # 200 200 2 road_divider, lane_divider
-        dynamic = self.get_dynamic_layers(sample, anns_dynamic)                     # 200 200 8 car, truck, bus, trailer, construction, pedestrian, motorcycle, bicycle
-        velocity_map = self.get_velocity_layers(sample, anns_vehicle, debug=False)   # 200 200 2 vehicles
-        ############################## later: get rid of debug=True ##############################
-        bev = np.concatenate((static, dividers, dynamic), -1)                       # 200 200 12
-        assert bev.shape[2] == NUM_CLASSES
+            static = self.get_static_layers(sample, STATIC)                             # 200 200 2 lane, road_segment
+            dividers = self.get_line_layers(sample, DIVIDER)                            # 200 200 2 road_divider, lane_divider
+            dynamic = self.get_dynamic_layers(sample, anns_dynamic)                     # 200 200 8 car, truck, bus, trailer, construction, pedestrian, motorcycle, bicycle
+            velocity_map = self.get_velocity_layers(sample, anns_vehicle, debug=False)  # 200 200 2 vehicles
 
-        # Additional labels for vehicles only.
-        aux, visibility = self.get_dynamic_objects(sample, anns_vehicle)
+            # Raw annotations
+            prev_anns_dynamic = self.get_annotations_by_category(prev_sample, DYNAMIC) 
+            prev_anns_vehicle = self.get_annotations_by_category(prev_sample, ['vehicle'])[0]
 
-        # Package the data.
-        data = Sample(
-            view=self.view.tolist(),
-            bev=bev,
-            velocity_map=velocity_map,
-            aux=aux,
-            visibility=visibility,
-            **sample
-        )
+            prev_static = self.get_static_layers(prev_sample, STATIC)                   # 200 200 2 lane, road_segment
+            prev_dividers = self.get_line_layers(prev_sample, DIVIDER)                  # 200 200 2 road_divider, lane_divider
+            prev_dynamic = self.get_dynamic_layers(prev_sample, prev_anns_dynamic)      # 200 200 8 car, truck, bus, trailer, construction, pedestrian, motorcycle, bicycle
 
-        if self.transform is not None:
-            data = self.transform(data)
+            bev = np.concatenate((static, dividers, dynamic), -1)                       # 200 200 12
+            prev_bev = np.concatenate((prev_static, prev_dividers, prev_dynamic), -1)   # 200 200 12
 
-        return data
+            assert bev.shape[2] == NUM_CLASSES
+
+            # Additional labels for vehicles only.
+            aux, visibility = self.get_dynamic_objects(sample, anns_vehicle)
+            prev_aux, prev_visibility = self.get_dynamic_objects(prev_sample, prev_anns_vehicle)
+
+            # Package the data.
+            data = Sample(
+                view=self.view.tolist(),
+                prev_bev = prev_bev,
+                bev=bev,
+                prev_aux = prev_aux,
+                aux=aux,
+                prev_visibility = prev_visibility,
+                visibility=visibility,
+                velocity_map=velocity_map,
+                **sample,
+            )
+
+            if self.transform is not None:
+                data = self.transform(data)
+
+            return data
